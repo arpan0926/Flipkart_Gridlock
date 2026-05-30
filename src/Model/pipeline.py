@@ -11,7 +11,7 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 TARGET_COLUMN = "demand"
 NUMERIC_FEATURES = ["day", "NumberofLanes", "Temperature", "hour", "minute"]
-CATEGORICAL_FEATURES = ["geohash", "timestamp", "RoadType", "LargeVehicles", "Landmarks", "Weather"]
+CATEGORICAL_FEATURES = ["geohash","timestamp", "RoadType", "LargeVehicles", "Landmarks", "Weather"]
 FEATURE_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
@@ -70,7 +70,7 @@ def build_model_pipeline() -> Pipeline:
     return Pipeline(
         [
             ("preprocessor", build_preprocessor()),
-            ("regressor", RandomForestRegressor(n_estimators=100, random_state=42)),
+            ("regressor", RandomForestRegressor(n_estimators=100, random_state=42 , n_jobs=-1)),
         ]
     )
 

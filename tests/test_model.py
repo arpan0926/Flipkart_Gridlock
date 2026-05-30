@@ -1,6 +1,6 @@
 import pandas as pd
 
-from flipkart_gridlock.model import train_model, evaluate_model
+from Model.model import train_model, evaluate_model
 
 
 def test_train_and_evaluate_model():

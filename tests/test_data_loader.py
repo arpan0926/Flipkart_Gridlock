@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from flipkart_gridlock.data_loader import load_dataset
+from Model.data_loader import load_dataset
 
 
 def test_load_dataset_paths():

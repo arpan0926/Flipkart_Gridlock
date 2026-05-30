@@ -2,8 +2,8 @@ from pathlib import Path
 
 from sklearn.model_selection import train_test_split
 
-from flipkart_gridlock.data_loader import load_dataset
-from flipkart_gridlock.pipeline import prepare_features, train_pipeline, evaluate_pipeline
+from Model.data_loader import load_dataset
+from Model.pipeline import prepare_features, train_pipeline, evaluate_pipeline
 
 
 def main() -> None:
@@ -23,6 +23,20 @@ def main() -> None:
     print("\nValidation metrics:")
     print(f"- RMSE: {metrics['rmse']:.6f}")
     print(f"- R2: {metrics['r2']:.6f}")
+    # 1. Get the preprocessor and the random forest from the pipeline
+    preprocessor = model.named_steps["preprocessor"]
+    rf_model = model.named_steps["regressor"]
+    
+    # 2. Extract the actual feature names after One-Hot Encoding
+    feature_names = preprocessor.get_feature_names_out()
+    importances = rf_model.feature_importances_
+    
+    # 3. Zip them together, sort them, and print the top 5
+    feature_importance_list = sorted(zip(importances, feature_names), reverse=True)
+    print("\nTop 5 feature importances:")
+    for importance, name in feature_importance_list[:5]:
+        print(f"- {name}: {importance:.6f}")
+
 
     test_X, _ = prepare_features(data["test"], target=None)
     predictions = model.predict(test_X)

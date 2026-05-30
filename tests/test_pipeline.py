@@ -1,6 +1,6 @@
 import pandas as pd
 
-from flipkart_gridlock.pipeline import build_model_pipeline, evaluate_pipeline, prepare_features, train_pipeline
+from Model.pipeline import build_model_pipeline, evaluate_pipeline, prepare_features, train_pipeline
 
 
 def test_prepare_features_with_target():
