@@ -4,11 +4,10 @@ This repository contains a Python data science project for the Flipkart Gridlock
 
 ## Structure
 
-- `dataset/` - existing raw dataset files
 - `src/` - project source code
 - `scripts/` - runnable workflows
 - `tests/` - unit tests
-- `notebooks/` - exploratory analysis notebooks
+
 
 ## Setup
 
@@ -31,6 +30,4 @@ python scripts\run_analysis.py
 
 ## Notes
 
-- Keep raw dataset files in `dataset/`
-- Add notebooks to `notebooks/`
 - Add domain-specific modeling code under `src/flipkart_gridlock`
