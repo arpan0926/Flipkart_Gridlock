@@ -5,3 +5,5 @@ matplotlib
 seaborn
 jupyter
 pytest
+pygeohash
+lightgbm
