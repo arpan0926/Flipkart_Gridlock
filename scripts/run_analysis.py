@@ -1,9 +1,12 @@
 from pathlib import Path
 import pandas as pd
+import numpy as np
 from datetime import datetime
+from sklearn.metrics import r2_score, mean_squared_error
+from lightgbm import early_stopping, log_evaluation
 
 from Model.data_loader import load_dataset
-from Model.pipeline import build_model_pipeline, prepare_features, evaluate_pipeline
+from Model.pipeline import build_model, prepare_features, _parse_timestamp
 
 
 def main() -> None:
@@ -12,61 +15,80 @@ def main() -> None:
 
     print("Loaded dataset files:")
     for name, frame in data.items():
-        print(f"- {name}: {frame.shape[0]} rows, {frame.shape[1]} columns")
+        print(f"  {name}: {frame.shape[0]:,} rows, {frame.shape[1]} columns")
 
-    X, y = prepare_features(data["train"])
-    
-    # Chronological sort to prevent data leakage
-    X = X.sort_values(by=["day", "hour", "minute"])
-    y = y.loc[X.index] # Keep targets aligned with the sorted features
+    # Chronological 80/20 split
+    train_raw = data["train"]
+    train_sorted = _parse_timestamp(train_raw).sort_values(["day", "hour", "minute"])
+    split_index = int(len(train_sorted) * 0.8)
 
-    # Take the first 80% of time for training, last 20% for validation
-    split_index = int(len(X) * 0.8)
-    
-    X_train, X_val = X.iloc[:split_index], X.iloc[split_index:]
-    y_train, y_val = y.iloc[:split_index], y.iloc[split_index:]
+    train_split_raw = train_raw.iloc[list(train_sorted.index[:split_index])]
+    val_split_raw   = train_raw.iloc[list(train_sorted.index[split_index:])]
 
-    # 1. Build the empty pipeline
-    model = build_model_pipeline() 
-    
-    # 2. Train the pipeline and tell LightGBM to natively handle 'category' dtypes
-    print("\nTraining ensemble model...")
-    model.fit(X_train, y_train)
+    X_train, y_train = prepare_features(train_split_raw)
+    X_val,   y_val   = prepare_features(val_split_raw)
 
-    # 3. Evaluate on the validation set
-    metrics = evaluate_pipeline(model, X_val, y_val)
+    print(f"\nSplit — Train: {len(X_train):,}  Val: {len(X_val):,}  Features: {X_train.shape[1]}")
 
-    print("\nValidation metrics:")
-    print(f"- RMSE: {metrics['rmse']:.6f}")
-    print(f"- R2: {metrics['r2']:.6f}")
+    # Align categories between train/val splits
+    for col in X_train.select_dtypes("category").columns:
+        cats = X_train[col].cat.categories.union(X_val[col].cat.categories)
+        X_train[col] = X_train[col].cat.set_categories(cats)
+        X_val[col]   = X_val[col].cat.set_categories(cats)
 
-    # Prepare test data and predict
+    print("\nTraining LightGBM with early stopping...")
+    model = build_model()
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)],
+        callbacks=[
+            early_stopping(stopping_rounds=60, verbose=True),
+            log_evaluation(period=100),
+        ],
+    )
+
+    best_iter = model.best_iteration_
+    print(f"\nBest iteration: {best_iter}")
+
+    preds_val = model.predict(X_val)
+    r2   = r2_score(y_val, preds_val)
+    rmse = mean_squared_error(y_val, preds_val) ** 0.5
+    print(f"\nValidation metrics (80/20 chronological):")
+    print(f"  RMSE: {rmse:.6f}")
+    print(f"  R2:   {r2:.6f}")
+
+    # Retrain on 100% of data with best_iter rounds
+    print("\nRetraining on full training data...")
+    X_full, y_full = prepare_features(train_raw)
+    final_model = build_model()
+    final_model.set_params(n_estimators=best_iter)
+    final_model.fit(X_full, y_full)
+    print("Done.")
+
+    # Test
+    print("\nPreparing test features...")
     test_X, _ = prepare_features(data["test"], target=None)
-    predictions = model.predict(test_X)
-    print(f"\nSample test predictions ({min(5, len(predictions))} rows):")
-    for value in predictions[:5]:
-        print(f"- {value:.6f}")
 
-    print("\nGenerating submission file...")
-    
-    # Read the raw test file directly to get the dropped 'Index' column
+    # Align test categories with full training categories
+    for col in X_full.select_dtypes("category").columns:
+        if col in test_X.columns:
+            cats = X_full[col].cat.categories.union(test_X[col].cat.categories)
+            X_full[col]  = X_full[col].cat.set_categories(cats)
+            test_X[col]  = test_X[col].cat.set_categories(cats)
+
+    predictions = final_model.predict(test_X)
+
     raw_test_df = pd.read_csv(dataset_dir / "test.csv")
-    
-    # Create the submission dataframe
     submission = pd.DataFrame({
-        "Index": raw_test_df["Index"],
-        "demand": predictions
+        "Index":  raw_test_df["Index"],
+        "demand": predictions,
     })
-    
-    # Use the timestamp to prevent overwriting old submissions
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S") 
-    file_name = f"predictions_{timestamp}.csv"
-    
-    # Save it to the root of your project
-    submission_file = Path(__file__).resolve().parents[1] / file_name
-    submission.to_csv(submission_file, index=False)
-    
-    print(f"Successfully saved {len(submission)} predictions to {file_name}")
+    print(f"Submission shape: {submission.shape}")
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    fname = f"predictions_{ts}.csv"
+    submission.to_csv(Path(__file__).resolve().parents[1] / fname, index=False)
+    print(f"Saved → {fname}")
 
 
 if __name__ == "__main__":
