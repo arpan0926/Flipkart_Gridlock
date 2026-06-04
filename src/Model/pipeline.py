@@ -1,147 +1,149 @@
-from pathlib import Path
 from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 import pygeohash as pgh
-from xgboost import XGBRegressor
-from sklearn.ensemble import VotingRegressor
-from category_encoders import TargetEncoder
-from sklearn.compose import ColumnTransformer
 from lightgbm import LGBMRegressor
-from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 TARGET_COLUMN = "demand"
 
-TARGET_ENCODE_FEATURES = ["geohash"]
-# 1. ADDED the new numeric features: day_of_week, lat, and lon
+# ---------------------------------------------------------------------------
+# Feature columns
+# ---------------------------------------------------------------------------
+
 NUMERIC_FEATURES = [
-    "day", "NumberofLanes", "Temperature", "minute", "lat", "lon",
-    "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend", "is_rush_hour"
+    "hour", "minute", "day", "slot_of_day",
+    "hour_sin", "hour_cos",
+    "minute_sin", "minute_cos",
+    "day_sin", "day_cos",
+    "is_rush_hour", "is_late_night", "is_off_peak",
+    "NumberofLanes", "Temperature",
+    "lat", "lon",
+    "lat_hour_interaction", "lon_hour_interaction", "lat_lon_combined",
 ]
 
-# 2. REMOVED "geohash" and "timestamp" from categorical features
-CATEGORICAL_FEATURES = ["RoadType", "LargeVehicles", "Landmarks", "Weather"]
+CATEGORICAL_FEATURES = [
+    "RoadType", "LargeVehicles", "Landmarks", "Weather",
+    "geohash", "geohash_prefix4", "geohash_prefix5",
+]
 
 FEATURE_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
 
 
+# ---------------------------------------------------------------------------
+# Timestamp parsing
+# ---------------------------------------------------------------------------
+
 def _parse_timestamp(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-    df["timestamp"] = df["timestamp"].fillna("0:0").astype(str)
+    df["timestamp"]   = df["timestamp"].fillna("0:0").astype(str)
     parts = df["timestamp"].str.split(":", expand=True)
-    df["hour"] = pd.to_numeric(parts[0], errors="coerce").fillna(0).astype(int)
-    df["minute"] = pd.to_numeric(parts[1], errors="coerce").fillna(0).astype(int)
+    df["hour"]        = pd.to_numeric(parts[0], errors="coerce").fillna(0).astype(int)
+    df["minute"]      = pd.to_numeric(parts[1], errors="coerce").fillna(0).astype(int)
+    df["slot_of_day"] = df["hour"] * 4 + df["minute"] // 15
     return df
 
 
+# ---------------------------------------------------------------------------
+# Feature engineering
+# ---------------------------------------------------------------------------
+
 def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Create advanced spatio-temporal features."""
     df = df.copy()
-    
-    # 1. Day of Week
+
     if "day" in df.columns:
-        df["day_of_week"] = df["day"] % 7
-        
-        # Cyclical Day Encoding
-        df['day_sin'] = np.sin(2 * np.pi * df['day_of_week'] / 7)
-        df['day_cos'] = np.cos(2 * np.pi * df['day_of_week'] / 7)
-        df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
-    
-    # 2. Cyclical Hour Encoding
+        dow = df["day"] % 7
+        df["day_sin"] = np.sin(2 * np.pi * dow / 7)
+        df["day_cos"] = np.cos(2 * np.pi * dow / 7)
+
     if "hour" in df.columns:
-        df['hour_sin'] = np.sin(2 * np.pi * df['hour'] / 24)
-        df['hour_cos'] = np.cos(2 * np.pi * df['hour'] / 24)
-        df['is_rush_hour'] = df['hour'].apply(
-            lambda x: 1 if (7 <= x <= 10) or (16 <= x <= 19) else 0
-        )
-        
-    # 3. Decode Geohash
+        df["hour_sin"]    = np.sin(2 * np.pi * df["hour"] / 24)
+        df["hour_cos"]    = np.cos(2 * np.pi * df["hour"] / 24)
+        df["is_rush_hour"]  = ((df["hour"].between(7, 10)) | (df["hour"].between(16, 19))).astype(int)
+        df["is_late_night"] = ((df["hour"] <= 5) | (df["hour"] >= 23)).astype(int)
+        df["is_off_peak"]   = df["hour"].between(11, 15).astype(int)
+
+    if "minute" in df.columns:
+        df["minute_sin"] = np.sin(2 * np.pi * df["minute"] / 60)
+        df["minute_cos"] = np.cos(2 * np.pi * df["minute"] / 60)
+
     if "geohash" in df.columns:
-        df['lat'] = df['geohash'].apply(lambda x: pgh.decode(str(x))[0] if pd.notna(x) else None)
-        df['lon'] = df['geohash'].apply(lambda x: pgh.decode(str(x))[1] if pd.notna(x) else None)
+        df["lat"] = df["geohash"].apply(lambda x: pgh.decode(str(x))[0] if pd.notna(x) else np.nan)
+        df["lon"] = df["geohash"].apply(lambda x: pgh.decode(str(x))[1] if pd.notna(x) else np.nan)
+        df["geohash_prefix4"] = df["geohash"].apply(lambda x: str(x)[:4] if pd.notna(x) else "unknown")
+        df["geohash_prefix5"] = df["geohash"].apply(lambda x: str(x)[:5] if pd.notna(x) else "unknown")
+
+    if "lat" in df.columns and "hour_sin" in df.columns:
+        df["lat_hour_interaction"] = df["lat"] * df["hour_sin"]
+        df["lon_hour_interaction"] = df["lon"] * df["hour_cos"]
+    if "lat" in df.columns and "lon" in df.columns:
+        df["lat_lon_combined"] = df["lat"] * df["lon"]
 
     for col in CATEGORICAL_FEATURES:
         if col in df.columns:
             df[col] = df[col].astype("category")
-        
+
     return df
 
 
-def prepare_features(df: pd.DataFrame, target: Optional[str] = TARGET_COLUMN) -> Tuple[pd.DataFrame, Optional[pd.Series]]:
-    """Prepare feature matrix X and target vector y from raw DataFrame."""
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def prepare_features(
+    df: pd.DataFrame,
+    target: Optional[str] = TARGET_COLUMN,
+) -> Tuple[pd.DataFrame, Optional[pd.Series]]:
     df = df.copy()
-    
-    # Run the feature engineering steps
     df = _parse_timestamp(df)
-    df = _engineer_features(df) 
-    
+    df = _engineer_features(df)
     df = df.drop(columns=["Index"], errors="ignore")
 
-    if target is not None and target in df.columns:
+    if target and target in df.columns:
         y = df[target].astype(float)
         X = df.drop(columns=[target])
     else:
         y = None
         X = df
 
-    missing_features = set(FEATURE_COLUMNS) - set(X.columns)
-    if missing_features:
-        raise ValueError(f"Missing expected features: {sorted(missing_features)}")
+    missing = set(FEATURE_COLUMNS) - set(X.columns)
+    if missing:
+        raise ValueError(f"Missing expected features: {sorted(missing)}")
 
-    return X, y
+    return X[FEATURE_COLUMNS], y
 
 
-def build_preprocessor() -> ColumnTransformer:
-    numeric_transformer = Pipeline(
-        [
-            ("imputer", SimpleImputer(strategy="mean")),
-            ("scaler", StandardScaler()),
-        ]
-    )
-    
-
-    preprocessor = ColumnTransformer(
-        [
-            ("numeric", numeric_transformer, NUMERIC_FEATURES),
-            # Just pass the categorical columns directly through
-            ("categorical", "passthrough", CATEGORICAL_FEATURES),
-            ("target_encoding", TargetEncoder(smoothing=10), TARGET_ENCODE_FEATURES), 
-        ],
-        remainder="drop",
-    )
-    
-    preprocessor.set_output(transform="pandas")
-    
-    return preprocessor
-
-def build_model_pipeline() -> Pipeline:
-    return Pipeline(
-        [
-            ("preprocessor", build_preprocessor()),
-            ("regressor", LGBMRegressor(
-                n_estimators=600,        # Increased trees for better learning
-                learning_rate=0.03,      # Slower learning rate for precision
-                num_leaves=63,           # Allows deeper spatial logic
-                max_depth=8,             # Caps depth to prevent overfitting the test set
-                min_child_samples=20,    # Ensures leaf nodes have enough data
-                verbose=-1,
-                random_state=42,
-                n_jobs=-1
-            )),
-        ]
+def build_model() -> LGBMRegressor:
+    return LGBMRegressor(
+        num_leaves=255,
+        max_depth=12,
+        min_child_samples=10,
+        n_estimators=2000,
+        learning_rate=0.02,
+        subsample=0.8,
+        subsample_freq=1,
+        colsample_bytree=0.8,
+        reg_alpha=0.05,
+        reg_lambda=1.0,
+        verbose=-1,
+        random_state=42,
+        n_jobs=-1,
     )
 
-def train_pipeline(X: pd.DataFrame, y: pd.Series) -> Pipeline:
-    pipeline = build_model_pipeline()
-    pipeline.fit(X, y)
-    return pipeline
+
+def build_model_pipeline() -> LGBMRegressor:
+    """Alias for test compatibility."""
+    return build_model()
 
 
-def evaluate_pipeline(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series) -> dict:
-    preds = pipeline.predict(X)
+def train_pipeline(X: pd.DataFrame, y: pd.Series) -> LGBMRegressor:
+    model = build_model()
+    model.fit(X, y)
+    return model
+
+
+def evaluate_pipeline(model, X: pd.DataFrame, y: pd.Series) -> dict:
+    preds = model.predict(X)
     mse = mean_squared_error(y, preds)
     return {
         "rmse": float(mse**0.5),
