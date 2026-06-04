@@ -28,12 +28,22 @@ Flipkart_Gridlock/
 ```
 
 ⚙️ Core Components & Architecture
-1. Data Loader (src/Model/data_loader.py)Uses pathlib to dynamically locate the dataset/ folder, ensuring the code runs flawlessly on any teammate's machine regardless of where they cloned the repository.
-2.  Feature Engineering & Pipeline (src/Model/pipeline.py)This is the brain of the project. It explicitly handles spatio-temporal data without causing data leakage.Cyclical Time Encoding: Converts linear time (hour, day_of_week) into continuous circles using sine and cosine functions. This allows the model to understand that Midnight and 11:00 PM are continuous.Geohash Decoding: Translates alphanumeric geohash strings into raw lat and lon coordinates using the pygeohash library.Native Categorical Handling: Passes text columns (RoadType, Weather, geohash) directly to LightGBM without One-Hot Encoding, utilizing LightGBM's highly optimized categorical splitting algorithm.Explicit Domain Flags: Generates specific flags like is_rush_hour to explicitly hand the model human-behavior context.
+1. Data Loader (src/Model/data_loader.py) Uses pathlib to dynamically locate the dataset/ folder, ensuring the code runs flawlessly on any teammate's machine regardless of where they cloned the repository.
+  
+2.  Feature Engineering & Pipeline (src/Model/pipeline.py) This is the brain of the project. It explicitly handles spatio-temporal data without causing data leakage.
+   Cyclical Time Encoding: Converts linear time (hour, day_of_week) into continuous circles using sine and cosine functions. This allows the model to understand  that Midnight and 11:00 PM are continuous.
+
+   Geohash Decoding: Translates alphanumeric geohash strings into raw lat and lon coordinates using the pygeohash library.
+   Native Categorical Handling: Passes text columns (RoadType, Weather, geohash) directly to LightGBM without One-Hot Encoding, utilizing LightGBM's highly   optimized categorical splitting algorithm.
+   
+   Explicit Domain Flags: Generates specific flags like is_rush_hour to explicitly hand the model human-behavior context.
+
 3. The ModelThe pipeline uses LightGBM (LGBMRegressor). It is configured to handle medium-sized datasets (~60k rows) while preventing overfitting through controlled leaf structures and subsampling mechanisms.
-4. The Execution Script (scripts/run_analysis.py)The orchestrator script. It enforces Chronological Sorting before splitting the train/validation data. This is critical for time-series forecasting to ensure the model never looks into the future to predict the past. It automatically evaluates the $R^2$ and RMSE scores locally and generates a timestamped predictions.csv ready for hackathon submission.
+   
+5. The Execution Script (scripts/run_analysis.py)The orchestrator script. It enforces Chronological Sorting before splitting the train/validation data. This is critical for time-series forecasting to ensure the model never looks into the future to predict the past. It automatically evaluates the $R^2$ and RMSE scores locally and generates a timestamped predictions.csv.
 
 🚀 Setup & Installation Instructions1.
+
 Clone the repository and navigate into it.
 Bash
 git clone <repository_url>cd Flipkart_Gridlock
@@ -50,6 +60,7 @@ pip install -e .
 5. Add the dataset.Ensure train.csv and test.csv are placed directly inside a dataset/ folder at the root of the project.
 
 🏃 How to Run the Pipeline
+
 To execute the entire pipeline (train the model, evaluate the local validation score, and generate the hackathon submission file), 
 run:Bash
 python scripts/run_analysis.py
