@@ -4,6 +4,7 @@ import pandas as pd
 import pygeohash as pgh
 from lightgbm import LGBMRegressor
 from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.model_selection import TimeSeriesSplit
 
 TARGET_COLUMN = "demand"
 
@@ -78,10 +79,19 @@ def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
         df["lon_hour_interaction"] = df["lon"] * df["hour_cos"]
     if "lat" in df.columns and "lon" in df.columns:
         df["lat_lon_combined"] = df["lat"] * df["lon"]
+    if "NumberofLanes" in df.columns and "RoadType" in df.columns:
+        df["Road_lane_Profile"] = df["RoadType"].astype(str) + "_" + df["NumberofLanes"].astype(str)
+    if "Temperature" in df.columns:
+        df["Temperature"] = df["Temperature"].fillna(
+            df.groupby("hour")["Temperature"].transform("mean")
+        )
+        df["Temperature"] = df["Temperature"].fillna(df["Temperature"].mean())
+
+
 
     for col in CATEGORICAL_FEATURES:
         if col in df.columns:
-            df[col] = df[col].astype("category")
+            df[col] = df[col].fillna("Unknown").astype(str).astype("category")
 
     return df
 
