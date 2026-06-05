@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 from lightgbm import LGBMRegressor
 from catboost import CatBoostRegressor
-
+import numpy as np
 from Model.data_loader import load_dataset
 from Model.pipeline import prepare_features, _parse_timestamp, CATEGORICAL_FEATURES
 
@@ -20,10 +20,13 @@ def main() -> None:
     # ---------------------------------------------------------
     print("\nPreparing full training dataset...")
     train_raw = data["train"]
-    train_sorted = _parse_timestamp(train_raw).sort_values(["day", "hour", "minute"])
-    X_full, y_full = prepare_features(train_sorted)
+    test_raw = data["test"]
 
-    test_X, _ = prepare_features(data["test"], target=None)
+    train_parsed = _parse_timestamp(train_raw).sort_values(["day", "hour", "minute"])
+    test_parsed = _parse_timestamp(test_raw)
+
+    X_full, y_full = prepare_features(train_parsed)
+    test_X, _ = prepare_features(test_parsed, target=None)
 
     # Align categories between train and test so LightGBM doesn't crash
     for col in X_full.select_dtypes("category").columns:
@@ -31,6 +34,9 @@ def main() -> None:
             cats = X_full[col].cat.categories.union(test_X[col].cat.categories)
             X_full[col] = X_full[col].cat.set_categories(cats)
             test_X[col] = test_X[col].cat.set_categories(cats)
+
+    # --- THE LOG TRANSFORM (The 91.63 Savior) ---
+    y_full_log = np.log1p(y_full)
 
     # ---------------------------------------------------------
     # MODEL 1: LightGBM (The 91.22 Baseline Parameters)
@@ -50,7 +56,7 @@ def main() -> None:
         verbose=-1,
         n_jobs=-1
     )
-    final_lgbm.fit(X_full, y_full)
+    final_lgbm.fit(X_full, y_full_log)
     lgbm_preds = final_lgbm.predict(test_X)
 
     # ---------------------------------------------------------
@@ -69,7 +75,7 @@ def main() -> None:
         random_seed=42,
         verbose=100              
     )
-    final_cat.fit(X_full, y_full)
+    final_cat.fit(X_full, y_full_log)
     cat_preds = final_cat.predict(test_X)
 
     # ---------------------------------------------------------
@@ -77,8 +83,8 @@ def main() -> None:
     # ---------------------------------------------------------
     print("\nBlending predictions...")
     
-    # Weight LightGBM slightly higher since it historically performed better
-    final_predictions = (lgbm_preds * 0.60) + (cat_preds * 0.40)
+    blended_preds_log = (lgbm_preds * 0.60) + (cat_preds * 0.40)
+    final_predictions = np.expm1(blended_preds_log)  # Convert back from log scale
 
     raw_test_df = pd.read_csv(dataset_dir / "test.csv")
     submission = pd.DataFrame({

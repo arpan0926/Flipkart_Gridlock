@@ -20,12 +20,13 @@ NUMERIC_FEATURES = [
     "is_rush_hour", "is_late_night", "is_off_peak",
     "NumberofLanes", "Temperature",
     "lat", "lon",
-    "lat_hour_interaction", "lon_hour_interaction", "lat_lon_combined",
+    "lat_hour_interaction", "lon_hour_interaction", "lat_lon_combined", 
 ]
 
 CATEGORICAL_FEATURES = [
     "RoadType", "LargeVehicles", "Landmarks", "Weather",
     "geohash", "geohash_prefix4", "geohash_prefix5",
+
 ]
 
 FEATURE_COLUMNS = NUMERIC_FEATURES + CATEGORICAL_FEATURES
@@ -54,6 +55,7 @@ def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
 
     if "day" in df.columns:
         dow = df["day"] % 7
+        
         df["day_sin"] = np.sin(2 * np.pi * dow / 7)
         df["day_cos"] = np.cos(2 * np.pi * dow / 7)
 
@@ -86,8 +88,6 @@ def _engineer_features(df: pd.DataFrame) -> pd.DataFrame:
             df.groupby("hour")["Temperature"].transform("mean")
         )
         df["Temperature"] = df["Temperature"].fillna(df["Temperature"].mean())
-
-
 
     for col in CATEGORICAL_FEATURES:
         if col in df.columns:
@@ -132,7 +132,7 @@ def build_model() -> LGBMRegressor:
         learning_rate=0.02,
         subsample=0.8,
         subsample_freq=1,
-        colsample_bytree=0.8,
+        colsample_bytree=0.8,   
         reg_alpha=0.05,
         reg_lambda=1.0,
         verbose=-1,
