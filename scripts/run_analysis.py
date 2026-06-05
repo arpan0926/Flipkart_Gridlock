@@ -35,11 +35,11 @@ def main() -> None:
             X_full[col] = X_full[col].cat.set_categories(cats)
             test_X[col] = test_X[col].cat.set_categories(cats)
 
-    # --- THE LOG TRANSFORM (The 91.63 Savior) ---
+    # --- THE LOG TRANSFORM ---
     y_full_log = np.log1p(y_full)
 
     # ---------------------------------------------------------
-    # MODEL 1: LightGBM (The 91.22 Baseline Parameters)
+    # MODEL 1: LightGBM 
     # ---------------------------------------------------------
     print("\n[1/2] Training LightGBM on 100% of data...")
     final_lgbm = LGBMRegressor(
