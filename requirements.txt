@@ -7,3 +7,5 @@ jupyter
 pytest
 pygeohash
 lightgbm
+catboost
+optuna
